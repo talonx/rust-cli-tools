@@ -16,6 +16,8 @@ enum Command {
         ///Show hidden files also
         #[clap(short='a')]
         a: bool,
+        ///File or directory
+        file: Option<String>,
     },
     ///Example command for testing
     Ex {
@@ -27,9 +29,9 @@ fn main() {
     
     let cli = Cli::parse();
     match &cli.cmd {
-        Command::Ls{a} => {
-            println!("Listing {:?}", a);
-            match ls(*a) {
+        Command::Ls{a, file} => {
+//            println!("Listing {:?}", a);
+            match ls(*a, file) {
                 Ok(()) => {},
                 Err(err) => {
                     println!("Error {}", err);
@@ -42,8 +44,13 @@ fn main() {
 }
 
 //TODO support specific dir later
-fn ls(hidden: bool) -> io::Result<()> {
-    for entry in fs::read_dir(".")? {
+fn ls(hidden: bool, target: &Option<String>) -> io::Result<()> {
+    let mut target_dir = ".";
+    match target {
+        Some(target) => target_dir = target,
+        None => {},
+    }
+    for entry in fs::read_dir(target_dir)? {
         let dir = entry?;
         let name = dir.file_name().into_string();
         match name {
