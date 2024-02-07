@@ -1,8 +1,9 @@
 use clap::{Parser, Subcommand};
-use std:: {
-    path::PathBuf,
+use regex::Regex;
+use std::{
     fs::{self, File},
-    io::{Read, Result as IOResult, ErrorKind, Write, Error as IOError},
+    io::{BufRead, BufReader, Error as IOError, ErrorKind, Read, Result as IOResult, Write},
+    path::PathBuf,
 };
 
 #[derive(Debug, Parser)]
@@ -29,26 +30,96 @@ enum Command {
         ///the target file to copy to
         target: String,
     },
+    Ps {},
     ///example command for testing
-    Ex { b: String },
+    Ex {
+        b: String,
+    },
 }
 
 fn main() {
     let cli = Cli::parse();
     let res = match &cli.cmd {
         Command::Ls { a, file } => ls(*a, file),
-        Command::Cp {source, target} => copy(source, target),
-        Command::Ex {..} => Ok(()),
+        Command::Cp { source, target } => copy(source, target),
+        Command::Ps {} => ps(),
+        Command::Ex { .. } => Ok(()),
     };
     match res {
-        Ok(_) => {},
+        Ok(_) => {}
         Err(e) => {
             eprintln!("Error: {}", e);
             //TODO https://rust-cli.github.io/book/in-depth/exit-code.html
             std::process::exit(1);
-        },
+        }
     };
     //println!("{:?}", cli);
+}
+
+fn ps() -> IOResult<()> {
+    let self_stat = File::open("/proc/self/status")?;
+    let bufreader = BufReader::new(self_stat);
+    let mut my_uid = String::from("");
+    for line in bufreader.lines() {
+        match line.unwrap() {
+            line if line.starts_with("Uid:") => {
+                my_uid = line.split('\t').nth(1).unwrap().to_owned();
+                break;
+            }
+            _ => {}
+        }
+    }
+    if my_uid == "" {
+        panic!("No self uid found");
+    }
+//    println!("Found uid {:?}", my_uid);
+    println!("PID    TTY    TIME    CMD");
+//    let my_uid_str = my_uid.as_str;
+    let re = Regex::new(r"[0-9]+").unwrap();
+    for entry in fs::read_dir("/proc")? {
+        let dir = entry?;
+        if dir.metadata()?.is_dir() {
+            let name = dir.file_name().into_string().unwrap();
+            if re.is_match(name.as_str()) {
+                let (uid, cmd) = get_proc_status(&name);
+                if my_uid == uid {
+                    println!("{} {} {} {}", name, get_tty(&name), get_time(&name), cmd);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn get_proc_status(pid_dir: &str) -> (String, String) {
+    let mut uid = String::from("");
+    let mut cmd = String::from("");
+    match File::open("/proc/".to_owned() + pid_dir + "/status") {
+        Ok(status_f) => {
+            let bufreader = BufReader::new(status_f);
+            for line in bufreader.lines() {
+                match line.unwrap() {
+                    line if line.starts_with("Uid:") => {
+                        uid = line.split('\t').nth(1).unwrap().to_owned();
+                    }
+                    line if line.starts_with("Name:") => {
+                        cmd = line.split('\t').nth(1).unwrap().to_owned();
+                    }
+                    std::string::String {..} => {},
+                }
+            }
+        }
+        Err(err) => panic!("Unable to read proc filesystem: {}", err),
+    }
+    (uid, cmd)
+}
+
+fn get_time(file: &str) -> &str {
+    "00:00:00"
+}
+
+fn get_tty(file: &str) -> &str {
+    "pts/x"
 }
 
 fn copy(source: &String, target: &String) -> IOResult<()> {
@@ -61,25 +132,24 @@ fn copy(source: &String, target: &String) -> IOResult<()> {
             Ok(0) => return Ok(()),
             Ok(n) => {
                 match f_target.write(&buf[0..n]) {
-                    Err(error) => {
-                        match error.kind() {
-                            ErrorKind::Interrupted => {},
-                            _ => return Err(error),
-                        }
+                    Err(error) => match error.kind() {
+                        ErrorKind::Interrupted => {}
+                        _ => return Err(error),
                     },
-                    Ok(0) => return Ok(()),//Not sure if this is right
+                    Ok(0) => return Ok(()), //Not sure if this is right
                     Ok(m) => {
                         if m < n {
-                            return Err(IOError::new(ErrorKind::Other, format!("wrote {} but had {}", m, n)));
+                            return Err(IOError::new(
+                                ErrorKind::Other,
+                                format!("wrote {} but had {}", m, n),
+                            ));
                         }
                     }
                 }
-            },
-            Err(error) => {
-                match error.kind() {
-                    ErrorKind::Interrupted => {},
-                    _ => return Err(error),
-                }
+            }
+            Err(error) => match error.kind() {
+                ErrorKind::Interrupted => {}
+                _ => return Err(error),
             },
         }
     }
