@@ -56,6 +56,7 @@ fn main() {
     //println!("{:?}", cli);
 }
 
+//https://docs.kernel.org/filesystems/proc.html
 fn ps() -> IOResult<()> {
     let self_stat = File::open("/proc/self/status")?;
     let bufreader = BufReader::new(self_stat);
@@ -118,8 +119,17 @@ fn get_time(file: &str) -> &str {
     "00:00:00"
 }
 
-fn get_tty(file: &str) -> &str {
-    "pts/x"
+fn get_tty(pid_dir: &str) -> String {
+    match File::open("/proc/".to_owned() + pid_dir + "/stat") {
+        Ok(stat_f) => {
+            let bufreader = BufReader::new(stat_f);
+            match bufreader.lines().next() {
+                None => panic!("No lines in stat file for {}", pid_dir),
+                Some(line) => line.expect("Failed to read stat file").split(' ').nth(6).unwrap().to_owned()
+            }
+        },
+        Err(err) => panic!("Unable to read the proc filesystem: {}", err),
+    }
 }
 
 fn copy(source: &String, target: &String) -> IOResult<()> {
